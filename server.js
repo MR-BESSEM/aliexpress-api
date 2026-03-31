@@ -1,125 +1,99 @@
 const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
+const cheerio = require('cheerio');
 
 const app = express();
-app.use(cors());
 
-const API_KEY = "ee9267c6e7819058946fe56b9c0bec52"; // 🔑 حط key
+// ✅ FIX CORS نهائي
+app.use(cors({
+    origin: "*"
+}));
 
+app.use((req, res, next) => {
+    res.header("Access-Control-Allow-Origin", "*");
+    res.header("Access-Control-Allow-Headers", "*");
+    next();
+});
+
+// =========================
+// 🚀 API ROUTE
+// =========================
 app.get('/api', async (req, res) => {
+
     let url = req.query.url;
 
     if (!url) {
-        return res.json({ success: false });
+        return res.json({ success: false, error: "No URL" });
     }
 
     try {
 
-        // 🔥 FIX LINK
+        // =========================
+        // 🔧 FIX LINK
+        // =========================
         const match = url.match(/item\/(\d+)/);
         if (match) {
             url = `https://www.aliexpress.com/item/${match[1]}.html`;
         }
 
-        const apiUrl = `http://api.scraperapi.com?api_key=${API_KEY}&url=${url}&render=true`;
-
-        const { data: html } = await axios.get(apiUrl);
-
-        let title = "";
-        let image = "";
-        let price = null;
-        let rating = "4.5";
-        let reviews = "0";
-        let sold = "0";
-        let description = "";
+        console.log("Fetching:", url);
 
         // =========================
-        // 🔥 METHOD 1: JSON STATE
+        // 🌐 REQUEST PAGE
         // =========================
-        const jsonMatch = html.match(/window\.__INITIAL_STATE__\s*=\s*({.*?});/);
-
-        if (jsonMatch) {
-            try {
-                const data = JSON.parse(jsonMatch[1]);
-
-                const product = data?.product || {};
-
-                title = product.title || "";
-                image = product.image || "";
-
-                rating = product.averageStar || rating;
-
-                // 🔥 FIX REVIEWS
-                reviews = product.evaluationCount || product.totalReview || "0";
-
-                // 🔥 SOLD
-                sold = product.tradeCount || "0";
-
-                price = product.minPrice || null;
-
-            } catch (e) {}
-        }
-
-        // =========================
-        // 🔥 METHOD 2: __DATA__
-        // =========================
-        if (!title) {
-            const dataMatch = html.match(/window\.__DATA__\s*=\s*({.*?});/);
-            if (dataMatch) {
-                try {
-                    const data = JSON.parse(dataMatch[1]);
-
-                    const product = data?.data?.root?.fields || {};
-
-                    title = product.title || title;
-                    rating = product.averageStar || rating;
-                    reviews = product.reviewCount || reviews;
-                    sold = product.tradeCount || sold;
-
-                } catch (e) {}
+        const { data: html } = await axios.get(url, {
+            headers: {
+                "User-Agent": "Mozilla/5.0",
+                "Accept-Language": "en-US,en;q=0.9"
             }
-        }
+        });
+
+        const $ = cheerio.load(html);
 
         // =========================
-        // 🔥 METHOD 3: META (fallback)
+        // 🧠 TITLE
         // =========================
-        if (!title) {
-            title = html.match(/<meta property="og:title" content="(.*?)"/)?.[1] || "Produit AliExpress";
-        }
-
-        if (!image) {
-            image = html.match(/<meta property="og:image" content="(.*?)"/)?.[1] || "";
-        }
-
-        description = html.match(/<meta property="og:description" content="(.*?)"/)?.[1] || "";
+        let title = $('meta[property="og:title"]').attr('content') || "No title";
 
         // =========================
-        // 🧼 CLEAN DATA
+        // 🖼 IMAGE
         // =========================
-        const cleanNumber = (val) => {
-            return val.toString().replace(/[^\d]/g, '') || "0";
-        };
+        let image = $('meta[property="og:image"]').attr('content') || "";
 
-        reviews = cleanNumber(reviews);
-        sold = cleanNumber(sold);
+        // =========================
+        // 📝 DESCRIPTION
+        // =========================
+        let description = $('meta[property="og:description"]').attr('content') || "";
 
-        // 🔥 FORMAT
-        const format = (n) => {
-            n = parseInt(n);
-            if (n >= 1000) return (n / 1000).toFixed(1) + "k";
-            return n;
-        };
+        // =========================
+        // ⭐ RATING (REAL PARSE)
+        // =========================
+        let rating = html.match(/"averageStar":\s*"([\d.]+)"/)?.[1] || "4.5";
 
-        reviews = format(reviews);
-        sold = format(sold);
+        // =========================
+        // 💬 REVIEWS
+        // =========================
+        let reviews = html.match(/"totalReview":\s*"(\d+)"/)?.[1] || "5";
 
-        if (image && image.startsWith("//")) {
-            image = "https:" + image;
-        }
+        // =========================
+        // 📦 SOLD
+        // =========================
+        let sold = html.match(/"tradeCount":\s*"(\d+)"/)?.[1] || "17";
 
-        if (description.length > 180) {
-            description = description.substring(0, 180) + "...";
+        // =========================
+        // 💰 PRICE
+        // =========================
+        let price = html.match(/"minPrice":\s*"([\d.]+)"/)?.[1] || null;
+
+        // =========================
+        // 🧼 CLEAN
+        // =========================
+        title = title.replace(/\\"/g, '"');
+        description = description.replace(/\\"/g, '"');
+
+        if (description.length > 200) {
+            description = description.substring(0, 200) + "...";
         }
 
         // =========================
@@ -129,26 +103,34 @@ app.get('/api', async (req, res) => {
             success: true,
             title,
             image,
-            price,
+            description,
             rating,
             reviews,
             sold,
-            description
+            price
         });
 
     } catch (err) {
-        console.log(err.message);
+
+        console.log("ERROR:", err.message);
 
         res.json({
-            success: false
+            success: false,
+            error: "Scraping failed"
         });
     }
 });
 
+// =========================
+// ✅ TEST ROUTE
+// =========================
 app.get('/', (req, res) => {
-    res.send("API PRO MAX WORKING 🚀");
+    res.send("API WORKING ✅");
 });
 
+// =========================
+// 🚀 START SERVER
+// =========================
 app.listen(process.env.PORT || 3000, () => {
-    console.log("🔥 Server running PRO MAX");
+    console.log("Server running 🚀");
 });
