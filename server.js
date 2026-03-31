@@ -1,13 +1,26 @@
 const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
-const cheerio = require('cheerio');
+const crypto = require('crypto');
 
 const app = express();
 app.use(cors());
 
-// 🧠 CACHE (speed x10)
-const cache = new Map();
+const APP_KEY = "519132";
+const APP_SECRET = "zVuEwukrhlQYK5tx4ibRBYqznPQlQw6l";
+
+function sign(params) {
+    const sorted = Object.keys(params).sort();
+    let str = APP_SECRET;
+
+    sorted.forEach(k => {
+        str += k + params[k];
+    });
+
+    str += APP_SECRET;
+
+    return crypto.createHash('md5').update(str).digest('hex').toUpperCase();
+}
 
 app.get('/api', async (req, res) => {
     let url = req.query.url;
@@ -16,117 +29,80 @@ app.get('/api', async (req, res) => {
         return res.json({ success: false, error: "No URL" });
     }
 
-    // 🔥 FIX LINK
-    const match = url.match(/item\/(\d+)/);
-    if (match) {
-        url = `https://www.aliexpress.com/item/${match[1]}.html`;
-    }
-
-    // ⚡ CACHE HIT
-    if (cache.has(url)) {
-        console.log("⚡ CACHE HIT");
-        return res.json({ success: true, ...cache.get(url) });
-    }
-
     try {
-        console.log("🔥 Fetching:", url);
-
-        // 🧠 FAKE REAL BROWSER
-        const { data: html } = await axios.get(url, {
-            headers: {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
-                "Accept-Language": "en-US,en;q=0.9",
-                "Accept": "text/html",
-                "Referer": "https://www.google.com/",
-            },
-            timeout: 15000
-        });
-
-        const $ = cheerio.load(html);
-
-        // =========================
-        // 🔥 TITLE + IMAGE
-        // =========================
-        let title = $('meta[property="og:title"]').attr('content') || $('title').text();
-        let image = $('meta[property="og:image"]').attr('content') || "";
-
-        let description = $('meta[property="og:description"]').attr('content') || "";
-
-        // =========================
-        // 💰 PRICE
-        // =========================
-        let price = null;
-        const priceMatch = html.match(/"price":"([\d.]+)"/);
-        if (priceMatch) price = parseFloat(priceMatch[1]);
-
-        // =========================
-        // ⭐ RATING + REVIEWS + SOLD (ULTRA FIX)
-        // =========================
-        let rating = "0";
-        let reviews = "0";
-        let sold = "0";
-
-        // الطريقة 1 (JSON)
-        const r1 = html.match(/"averageStar":"([\d.]+)"/);
-        if (r1) rating = r1[1];
-
-        const r2 = html.match(/"totalReview":(\d+)/);
-        if (r2) reviews = r2[1];
-
-        const r3 = html.match(/"tradeCount":"?(\d+)"/);
-        if (r3) sold = r3[1];
-
-        // الطريقة 2 (fallback)
-        if (reviews === "0") {
-            const r = html.match(/(\d+)\s*Reviews/);
-            if (r) reviews = r[1];
-        }
-
-        if (sold === "0") {
-            const s = html.match(/(\d+)\s*Sold/);
-            if (s) sold = s[1];
-        }
-
-        // =========================
-        // 🧼 CLEAN
-        // =========================
-        if (description.length > 150) {
-            description = description.substring(0, 150) + "...";
-        }
-
-        if (!title) title = "Produit AliExpress";
-        if (!image) image = "https://via.placeholder.com/300";
-
-        const result = {
-            title,
-            image,
-            price,
-            rating,
-            reviews,
-            sold,
-            description
+        // 🔥 STEP 1: CONVERT TO AFFILIATE LINK
+        const params = {
+            app_key: APP_KEY,
+            method: "aliexpress.affiliate.link.generate",
+            timestamp: Date.now(),
+            format: "json",
+            promotion_link_type: 0,
+            source_values: url,
         };
 
-        // 💾 SAVE CACHE
-        cache.set(url, result);
+        params.sign = sign(params);
 
+        const linkRes = await axios.get("https://api-sg.aliexpress.com/sync", {
+            params
+        });
+
+        const affiliateLink =
+            linkRes.data?.aliexpress_affiliate_link_generate_response?.resp_result?.result?.promotion_links?.[0]?.promotion_link;
+
+        if (!affiliateLink) {
+            return res.json({
+                success: false,
+                error: "Product not in affiliate system"
+            });
+        }
+
+        // 🔥 STEP 2: GET PRODUCT DETAILS
+        const params2 = {
+            app_key: APP_KEY,
+            method: "aliexpress.affiliate.productdetail.get",
+            timestamp: Date.now(),
+            format: "json",
+            product_ids: affiliateLink.match(/item\/(\d+)/)[1]
+        };
+
+        params2.sign = sign(params2);
+
+        const detailRes = await axios.get("https://api-sg.aliexpress.com/sync", {
+            params: params2
+        });
+
+        const product =
+            detailRes.data?.aliexpress_affiliate_productdetail_get_response?.resp_result?.result?.products?.[0];
+
+        if (!product) {
+            return res.json({ success: false, error: "No data" });
+        }
+
+        // 🎯 FINAL DATA
         res.json({
             success: true,
-            ...result
+            title: product.product_title,
+            image: product.product_main_image_url,
+            price: product.target_sale_price,
+            rating: product.evaluate_rate,
+            reviews: product.lastest_volume,
+            sold: product.sales_volume,
+            description: product.product_detail_url,
+            affiliate_link: affiliateLink
         });
 
     } catch (err) {
-        console.log("❌ ERROR:", err.message);
+        console.log(err.message);
 
         res.json({
             success: false,
-            error: "Blocked or failed"
+            error: "API failed"
         });
     }
 });
 
 app.get('/', (req, res) => {
-    res.send("🔥 ULTRA FAST API WORKING");
+    res.send("🔥 OFFICIAL API WORKING");
 });
 
 app.listen(process.env.PORT || 3000, () => {
