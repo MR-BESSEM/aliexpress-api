@@ -1,9 +1,26 @@
 const express = require("express");
-const puppeteer = require("puppeteer");
+const axios = require("axios");
+const crypto = require("crypto");
 const cors = require("cors");
 
 const app = express();
 app.use(cors());
+
+const APP_KEY = "519132";
+const APP_SECRET = "zVuEwukrhlQYK5tx4ibRBYqznPQlQw6l";
+
+function sign(params) {
+    const sorted = Object.keys(params).sort();
+    let base = APP_SECRET;
+
+    sorted.forEach(key => {
+        base += key + params[key];
+    });
+
+    base += APP_SECRET;
+
+    return crypto.createHash("md5").update(base).digest("hex").toUpperCase();
+}
 
 app.get("/api", async (req, res) => {
     let url = req.query.url;
@@ -13,87 +30,58 @@ app.get("/api", async (req, res) => {
     }
 
     try {
-        // ✅ FIX LINK
+        // ✅ extract product ID
         const match = url.match(/item\/(\d+)/);
-        if (match) {
-            url = `https://www.aliexpress.com/item/${match[1]}.html`;
+        if (!match) {
+            return res.json({ success: false, error: "Invalid URL" });
         }
 
-        console.log("🌍 Opening:", url);
+        const productId = match[1];
 
-const browser = await puppeteer.launch({
-  headless: true,
-  args: [
-    "--no-sandbox",
-    "--disable-setuid-sandbox",
-    "--disable-dev-shm-usage",
-    "--disable-gpu"
-  ]
-});
+        const params = {
+            method: "aliexpress.affiliate.productdetail.get",
+            app_key: APP_KEY,
+            sign_method: "md5",
+            timestamp: new Date().toISOString().replace(/[-:TZ.]/g, "").slice(0, 14),
+            format: "json",
+            v: "2.0",
+            product_ids: productId,
+            fields: "product_title,product_main_image_url,sale_price,original_price,discount,product_detail_url,shop_name,product_evaluate_rate,product_sales_volume"
+        };
 
-        const page = await browser.newPage();
+        params.sign = sign(params);
 
-        await page.setUserAgent(
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"
+        const { data } = await axios.get(
+            "https://api-sg.aliexpress.com/sync",
+            { params }
         );
 
-        await page.goto(url, {
-            waitUntil: "networkidle2",
-            timeout: 60000
-        });
+        const product =
+            data?.aliexpress_affiliate_productdetail_get_response?.result?.products?.product?.[0];
 
-        // ⏳ نستنى الداتا تتشحن
-        await page.waitForTimeout(3000);
-
-        // 🔥 EXTRACT REAL DATA
-        const data = await page.evaluate(() => {
-            let title = document.querySelector("h1")?.innerText || "";
-
-            let image =
-                document.querySelector("img")?.src ||
-                "";
-
-            let price =
-                document.querySelector(".product-price-value")?.innerText ||
-                "";
-
-            let rating =
-                document.querySelector(".overview-rating-average")?.innerText ||
-                "";
-
-            let reviews =
-                document.querySelector(".overview-rating-count")?.innerText ||
-                "";
-
-            let sold =
-                document.body.innerText.match(/(\d+)\s*sold/i)?.[1] ||
-                document.body.innerText.match(/(\d+)\s*vendus/i)?.[1] ||
-                "0";
-
-            return { title, image, price, rating, reviews, sold };
-        });
-
-        await browser.close();
+        if (!product) {
+            return res.json({ success: false, error: "No data" });
+        }
 
         res.json({
             success: true,
-            ...data
+            title: product.product_title,
+            image: product.product_main_image_url,
+            price: product.sale_price,
+            rating: product.product_evaluate_rate,
+            sold: product.product_sales_volume,
+            store: product.shop_name,
+            url: product.product_detail_url
         });
 
     } catch (err) {
-        console.log(err.message);
+        console.log(err.response?.data || err.message);
 
         res.json({
             success: false,
-            error: "Scraping failed"
+            error: "API failed"
         });
     }
 });
 
-app.get("/", (req, res) => {
-    res.send("PUPPETEER API WORKING 🚀");
-});
-
-app.listen(process.env.PORT || 3000, () => {
-    console.log("Server running...");
-});
+app.listen(3000, () => console.log("API WORKING 🔥"));
