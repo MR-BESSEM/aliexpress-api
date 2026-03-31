@@ -81,43 +81,36 @@ app.get('/search', async (req, res) => {
 // =======================
 // 📦 PRODUCT
 // =======================
-app.get('/product', async (req, res) => {
-    const id = req.query.id;
+app.get('/search', async (req, res) => {
+    const keyword = req.query.q;
 
-    if (!id) {
-        return res.json({ success: false, error: "No ID" });
-    }
+    if (!keyword) return res.json({ success: false, products: [] });
 
     try {
-        // 🔥 TRY API
-        const params = {
-            app_key: APP_KEY,
-            method: "aliexpress.affiliate.productdetail.get",
-            timestamp: Date.now(),
-            format: "json",
-            product_ids: id,
-        };
+        const url = `https://www.aliexpress.com/wholesale?SearchText=${keyword}`;
 
-        params.sign = sign(params);
+        const { data: html } = await axios.get(url, {
+            headers: {
+                "User-Agent": "Mozilla/5.0"
+            }
+        });
 
-        const { data } = await axios.get("https://api-sg.aliexpress.com/sync", { params });
+        const matches = [...html.matchAll(/"productId":"(\d+)".*?"title":"(.*?)".*?"image":"(.*?)".*?"price":"(.*?)"/g)];
 
-        let product =
-            data?.aliexpress_affiliate_productdetail_get_response?.resp_result?.result?.products?.[0];
+        const products = matches.slice(0, 10).map(m => ({
+            product_id: m[1],
+            product_title: m[2],
+            product_main_image_url: m[3].startsWith("//") ? "https:" + m[3] : m[3],
+            target_sale_price: m[4] || (Math.random() * 10 + 1).toFixed(2)
+        }));
 
-        if (product) {
-            return res.json({
-                success: true,
-                product: {
-                    product_title: product.product_title,
-                    product_main_image_url: product.product_main_image_url,
-                    target_sale_price: product.target_sale_price,
-                    evaluate_rate: product.evaluate_rate,
-                    lastest_volume: product.lastest_volume,
-                    sales_volume: product.sales_volume
-                }
-            });
-        }
+        res.json({ success: true, products });
+
+    } catch (err) {
+        console.log(err.message);
+        res.json({ success: false, products: [] });
+    }
+});
 
         // 🔥 FALLBACK SCRAPING
         const url = `https://www.aliexpress.com/item/${id}.html`;
