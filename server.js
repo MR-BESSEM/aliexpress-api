@@ -1,6 +1,5 @@
 const express = require('express');
 const axios = require('axios');
-const cheerio = require('cheerio');
 const cors = require('cors');
 
 const app = express();
@@ -14,32 +13,39 @@ app.get('/api', async (req, res) => {
     }
 
     try {
-        const response = await axios.get(url, {
+        const { data: html } = await axios.get(url, {
             headers: {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-                "Accept-Language": "en-US,en;q=0.9"
+                "Accept-Language": "en-US,en;q=0.9",
+                "Accept": "text/html"
             }
         });
 
-        const html = response.data;
-        const $ = cheerio.load(html);
+        let title = "No title";
+        let image = "";
+        let price = null;
+        let rating = "4.5";
+        let description = "";
 
-        // TITLE
-        let title = $('meta[property="og:title"]').attr('content') || "No title";
+        // 🔥 استخراج NEXT_DATA
+        const match = html.match(/<script id="__NEXT_DATA__" type="application\/json">(.*?)<\/script>/);
 
-        // IMAGE
-        let image = $('meta[property="og:image"]').attr('content') || "";
+        if (match && match[1]) {
+            const json = JSON.parse(match[1]);
 
-        // DESCRIPTION
-        let description = $('meta[property="og:description"]').attr('content') || "";
+            const product = json?.props?.pageProps?.initialData?.data;
 
-        // PRICE
-        let priceMatch = html.match(/"minPrice":"(.*?)"/);
-        let price = priceMatch ? priceMatch[1] : null;
+            if (product) {
+                title = product?.titleModule?.subject || title;
+                image = product?.imageModule?.imagePathList?.[0] || image;
+                price = product?.priceModule?.minPrice || price;
+                rating = product?.titleModule?.feedbackRating?.averageStar || rating;
+            }
+        }
 
-        // RATING
-        let ratingMatch = html.match(/"averageStar":"(.*?)"/);
-        let rating = ratingMatch ? ratingMatch[1] : "4.5";
+        // fallback description
+        const descMatch = html.match(/<meta property="og:description" content="(.*?)"/);
+        if (descMatch) description = descMatch[1];
 
         res.json({
             success: true,
@@ -56,10 +62,6 @@ app.get('/api', async (req, res) => {
     }
 });
 
-app.get('/', (req, res) => {
-    res.send("API WORKING ✅");
-});
-
 app.listen(process.env.PORT || 3000, () => {
-    console.log("Server started");
+    console.log("Server running...");
 });
