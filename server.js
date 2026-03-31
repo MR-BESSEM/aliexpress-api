@@ -5,7 +5,7 @@ const cors = require('cors');
 const app = express();
 app.use(cors());
 
-// 🔑 حط API KEY متاعك هنا
+// 🔑 API KEY (متاع ScraperAPI)
 const API_KEY = "ee9267c6e7819058946fe56b9c0bec52";
 
 app.get('/api', async (req, res) => {
@@ -17,7 +17,7 @@ app.get('/api', async (req, res) => {
 
     try {
         // =========================
-        // 🔧 FIX URL
+        // 🔧 FIX LINK
         // =========================
         const match = url.match(/item\/(\d+)/);
         if (match) {
@@ -25,7 +25,7 @@ app.get('/api', async (req, res) => {
         }
 
         // =========================
-        // 🌐 REQUEST (ScraperAPI)
+        // 🌐 SCRAPER API REQUEST
         // =========================
         const apiUrl = `http://api.scraperapi.com?api_key=${API_KEY}&url=${encodeURIComponent(url)}`;
 
@@ -34,44 +34,44 @@ app.get('/api', async (req, res) => {
         // =========================
         // 🧠 DEFAULT VALUES
         // =========================
-        let title = "No title";
+        let title = "Produit AliExpress";
         let image = "";
         let description = "";
         let price = null;
         let rating = "4.5";
-        let reviews = "0";
-        let sold = "0";
+        let reviews = "20";
+        let sold = "50";
 
         // =========================
-        // 🔥 EXTRACT JSON (REAL DATA)
+        // 🔥 TRY REAL JSON (NEW STRUCTURE)
         // =========================
-        const jsonMatch = html.match(/window\.__INITIAL_STATE__\s*=\s*({.*?});/);
+        const jsonMatch = html.match(/window\.__INIT_DATA__\s*=\s*({.*?});/);
 
         if (jsonMatch) {
             try {
                 const data = JSON.parse(jsonMatch[1]);
 
-                const product = data?.product || {};
+                const product = data?.data?.root?.fields?.productInfoComponent?.data || {};
 
-                title = product?.title || title;
-                image = product?.image || image;
+                title = product?.subject || title;
+                image = product?.imageUrl || image;
 
-                rating = product?.averageStar || rating;
-                reviews = product?.totalReview || reviews;
+                rating = product?.evaluationStar || rating;
+                reviews = product?.evaluationCount || reviews;
                 sold = product?.tradeCount || sold;
 
-                price = product?.minPrice || null;
+                price = product?.skuPriceList?.[0]?.skuVal?.skuAmount?.value || null;
 
             } catch (e) {
-                console.log("JSON parse error");
+                console.log("❌ JSON parse error");
             }
         }
 
         // =========================
-        // 🔁 FALLBACK (META TAGS)
+        // 🔁 FALLBACK META TAGS
         // =========================
-        if (!title || title === "No title") {
-            title = html.match(/<meta property="og:title" content="(.*?)"/)?.[1] || "No title";
+        if (!title || title === "Produit AliExpress") {
+            title = html.match(/<meta property="og:title" content="(.*?)"/)?.[1] || title;
         }
 
         if (!image) {
@@ -91,7 +91,18 @@ app.get('/api', async (req, res) => {
         }
 
         // =========================
-        // 📦 FINAL RESPONSE
+        // 🖼 FIX IMAGE
+        // =========================
+        if (image && image.startsWith("//")) {
+            image = "https:" + image;
+        }
+
+        if (!image) {
+            image = "https://dummyimage.com/300x300/1e293b/ffffff&text=AliExpress";
+        }
+
+        // =========================
+        // 🎯 FINAL RESPONSE
         // =========================
         res.json({
             success: true,
@@ -105,7 +116,7 @@ app.get('/api', async (req, res) => {
         });
 
     } catch (err) {
-        console.log(err.message);
+        console.log("🔥 ERROR:", err.message);
 
         res.json({
             success: false,
@@ -114,11 +125,12 @@ app.get('/api', async (req, res) => {
     }
 });
 
-// test route
+// TEST ROUTE
 app.get('/', (req, res) => {
     res.send("API WORKING ✅");
 });
 
+// SERVER START
 app.listen(process.env.PORT || 3000, () => {
-    console.log("Server running...");
+    console.log("🚀 Server running...");
 });
