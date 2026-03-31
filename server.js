@@ -6,7 +6,7 @@ const app = express();
 app.use(cors());
 
 // 🔑 حط API KEY متاعك هنا
-const API_KEY = "ee9267c6e7819058946fe56b9c0bec52";
+const API_KEY = "PUT_YOUR_API_KEY_HERE";
 
 app.get('/api', async (req, res) => {
     let url = req.query.url;
@@ -17,7 +17,7 @@ app.get('/api', async (req, res) => {
 
     try {
         // =========================
-        // 🔧 FIX URL (important)
+        // 🔧 FIX URL
         // =========================
         const match = url.match(/item\/(\d+)/);
         if (match) {
@@ -25,41 +25,60 @@ app.get('/api', async (req, res) => {
         }
 
         // =========================
-        // 🌐 REQUEST VIA SCRAPERAPI
+        // 🌐 REQUEST (ScraperAPI)
         // =========================
         const apiUrl = `http://api.scraperapi.com?api_key=${API_KEY}&url=${encodeURIComponent(url)}`;
 
         const { data: html } = await axios.get(apiUrl);
 
         // =========================
-        // 🧠 EXTRACTION (STRONG)
+        // 🧠 DEFAULT VALUES
         // =========================
+        let title = "No title";
+        let image = "";
+        let description = "";
+        let price = null;
+        let rating = "4.5";
+        let reviews = "0";
+        let sold = "0";
 
-        // TITLE
-        let title =
-            html.match(/"subject":"(.*?)"/)?.[1] ||
-            html.match(/<meta property="og:title" content="(.*?)"/)?.[1] ||
-            "No title";
+        // =========================
+        // 🔥 EXTRACT JSON (REAL DATA)
+        // =========================
+        const jsonMatch = html.match(/window\.__INITIAL_STATE__\s*=\s*({.*?});/);
 
-        // IMAGE
-        let image =
-            html.match(/<meta property="og:image" content="(.*?)"/)?.[1] ||
-            "";
+        if (jsonMatch) {
+            try {
+                const data = JSON.parse(jsonMatch[1]);
 
-        // DESCRIPTION
-        let description =
-            html.match(/<meta property="og:description" content="(.*?)"/)?.[1] ||
-            "";
+                const product = data?.product || {};
 
-        // PRICE
-        let price =
-            html.match(/"minPrice":"(.*?)"/)?.[1] ||
-            null;
+                title = product?.title || title;
+                image = product?.image || image;
 
-        // RATING
-        let rating =
-            html.match(/"averageStar":"(.*?)"/)?.[1] ||
-            "4.5";
+                rating = product?.averageStar || rating;
+                reviews = product?.totalReview || reviews;
+                sold = product?.tradeCount || sold;
+
+                price = product?.minPrice || null;
+
+            } catch (e) {
+                console.log("JSON parse error");
+            }
+        }
+
+        // =========================
+        // 🔁 FALLBACK (META TAGS)
+        // =========================
+        if (!title || title === "No title") {
+            title = html.match(/<meta property="og:title" content="(.*?)"/)?.[1] || "No title";
+        }
+
+        if (!image) {
+            image = html.match(/<meta property="og:image" content="(.*?)"/)?.[1] || "";
+        }
+
+        description = html.match(/<meta property="og:description" content="(.*?)"/)?.[1] || "";
 
         // =========================
         // 🧼 CLEAN DATA
@@ -67,13 +86,12 @@ app.get('/api', async (req, res) => {
         title = title.replace(/\\"/g, '"');
         description = description.replace(/\\"/g, '"');
 
-        // shorten description
         if (description.length > 200) {
             description = description.substring(0, 200) + "...";
         }
 
         // =========================
-        // 📦 RESULT
+        // 📦 FINAL RESPONSE
         // =========================
         res.json({
             success: true,
@@ -81,6 +99,8 @@ app.get('/api', async (req, res) => {
             image,
             price,
             rating,
+            reviews,
+            sold,
             description
         });
 
