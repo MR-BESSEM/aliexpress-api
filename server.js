@@ -5,73 +5,87 @@ const cors = require('cors');
 const app = express();
 app.use(cors());
 
-// 🔑 API KEY (متاع ScraperAPI)
-const API_KEY = "ee9267c6e7819058946fe56b9c0bec52";
+const API_KEY = "ee9267c6e7819058946fe56b9c0bec52"; // 🔑 حط key
 
 app.get('/api', async (req, res) => {
     let url = req.query.url;
 
     if (!url) {
-        return res.json({ success: false, error: "No URL" });
+        return res.json({ success: false });
     }
 
     try {
-        // =========================
-        // 🔧 FIX LINK
-        // =========================
+
+        // 🔥 FIX LINK
         const match = url.match(/item\/(\d+)/);
         if (match) {
             url = `https://www.aliexpress.com/item/${match[1]}.html`;
         }
 
-        // =========================
-        // 🌐 SCRAPER API REQUEST
-        // =========================
-        const apiUrl = `http://api.scraperapi.com?api_key=${API_KEY}&url=${encodeURIComponent(url)}`;
+        const apiUrl = `http://api.scraperapi.com?api_key=${API_KEY}&url=${url}&render=true`;
 
         const { data: html } = await axios.get(apiUrl);
 
-        // =========================
-        // 🧠 DEFAULT VALUES
-        // =========================
-        let title = "Produit AliExpress";
+        let title = "";
         let image = "";
-        let description = "";
         let price = null;
         let rating = "4.5";
-        let reviews = "20";
-        let sold = "50";
+        let reviews = "0";
+        let sold = "0";
+        let description = "";
 
         // =========================
-        // 🔥 TRY REAL JSON (NEW STRUCTURE)
+        // 🔥 METHOD 1: JSON STATE
         // =========================
-        const jsonMatch = html.match(/window\.__INIT_DATA__\s*=\s*({.*?});/);
+        const jsonMatch = html.match(/window\.__INITIAL_STATE__\s*=\s*({.*?});/);
 
         if (jsonMatch) {
             try {
                 const data = JSON.parse(jsonMatch[1]);
 
-                const product = data?.data?.root?.fields?.productInfoComponent?.data || {};
+                const product = data?.product || {};
 
-                title = product?.subject || title;
-                image = product?.imageUrl || image;
+                title = product.title || "";
+                image = product.image || "";
 
-                rating = product?.evaluationStar || rating;
-                reviews = product?.evaluationCount || reviews;
-                sold = product?.tradeCount || sold;
+                rating = product.averageStar || rating;
 
-                price = product?.skuPriceList?.[0]?.skuVal?.skuAmount?.value || null;
+                // 🔥 FIX REVIEWS
+                reviews = product.evaluationCount || product.totalReview || "0";
 
-            } catch (e) {
-                console.log("❌ JSON parse error");
+                // 🔥 SOLD
+                sold = product.tradeCount || "0";
+
+                price = product.minPrice || null;
+
+            } catch (e) {}
+        }
+
+        // =========================
+        // 🔥 METHOD 2: __DATA__
+        // =========================
+        if (!title) {
+            const dataMatch = html.match(/window\.__DATA__\s*=\s*({.*?});/);
+            if (dataMatch) {
+                try {
+                    const data = JSON.parse(dataMatch[1]);
+
+                    const product = data?.data?.root?.fields || {};
+
+                    title = product.title || title;
+                    rating = product.averageStar || rating;
+                    reviews = product.reviewCount || reviews;
+                    sold = product.tradeCount || sold;
+
+                } catch (e) {}
             }
         }
 
         // =========================
-        // 🔁 FALLBACK META TAGS
+        // 🔥 METHOD 3: META (fallback)
         // =========================
-        if (!title || title === "Produit AliExpress") {
-            title = html.match(/<meta property="og:title" content="(.*?)"/)?.[1] || title;
+        if (!title) {
+            title = html.match(/<meta property="og:title" content="(.*?)"/)?.[1] || "Produit AliExpress";
         }
 
         if (!image) {
@@ -83,26 +97,33 @@ app.get('/api', async (req, res) => {
         // =========================
         // 🧼 CLEAN DATA
         // =========================
-        title = title.replace(/\\"/g, '"');
-        description = description.replace(/\\"/g, '"');
+        const cleanNumber = (val) => {
+            return val.toString().replace(/[^\d]/g, '') || "0";
+        };
 
-        if (description.length > 200) {
-            description = description.substring(0, 200) + "...";
-        }
+        reviews = cleanNumber(reviews);
+        sold = cleanNumber(sold);
 
-        // =========================
-        // 🖼 FIX IMAGE
-        // =========================
+        // 🔥 FORMAT
+        const format = (n) => {
+            n = parseInt(n);
+            if (n >= 1000) return (n / 1000).toFixed(1) + "k";
+            return n;
+        };
+
+        reviews = format(reviews);
+        sold = format(sold);
+
         if (image && image.startsWith("//")) {
             image = "https:" + image;
         }
 
-        if (!image) {
-            image = "https://dummyimage.com/300x300/1e293b/ffffff&text=AliExpress";
+        if (description.length > 180) {
+            description = description.substring(0, 180) + "...";
         }
 
         // =========================
-        // 🎯 FINAL RESPONSE
+        // 📦 RESPONSE
         // =========================
         res.json({
             success: true,
@@ -116,21 +137,18 @@ app.get('/api', async (req, res) => {
         });
 
     } catch (err) {
-        console.log("🔥 ERROR:", err.message);
+        console.log(err.message);
 
         res.json({
-            success: false,
-            error: "API failed"
+            success: false
         });
     }
 });
 
-// TEST ROUTE
 app.get('/', (req, res) => {
-    res.send("API WORKING ✅");
+    res.send("API PRO MAX WORKING 🚀");
 });
 
-// SERVER START
 app.listen(process.env.PORT || 3000, () => {
-    console.log("🚀 Server running...");
+    console.log("🔥 Server running PRO MAX");
 });
