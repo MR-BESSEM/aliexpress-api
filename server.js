@@ -1,26 +1,11 @@
-const express = require('express');
-const axios = require('axios');
-const cors = require('cors');
-const cheerio = require('cheerio');
+const express = require("express");
+const puppeteer = require("puppeteer");
+const cors = require("cors");
 
 const app = express();
+app.use(cors());
 
-// ✅ CORS FIX
-app.use(cors({
-    origin: "*"
-}));
-
-app.use((req, res, next) => {
-    res.header("Access-Control-Allow-Origin", "*");
-    res.header("Access-Control-Allow-Headers", "*");
-    next();
-});
-
-// =========================
-// 🚀 API
-// =========================
-app.get('/api', async (req, res) => {
-
+app.get("/api", async (req, res) => {
     let url = req.query.url;
 
     if (!url) {
@@ -28,106 +13,70 @@ app.get('/api', async (req, res) => {
     }
 
     try {
-
-        // =========================
-        // 🔧 FIX URL
-        // =========================
+        // ✅ FIX LINK
         const match = url.match(/item\/(\d+)/);
         if (match) {
             url = `https://www.aliexpress.com/item/${match[1]}.html`;
         }
 
-        console.log("🚀 Fetch:", url);
+        console.log("🌍 Opening:", url);
 
-        // =========================
-        // 🔥 PROXY (ANTI BLOCK)
-        // =========================
-        const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
-
-        const { data: html } = await axios.get(proxyUrl, {
-            timeout: 15000
+        const browser = await puppeteer.launch({
+            headless: "new",
+            args: ["--no-sandbox", "--disable-setuid-sandbox"]
         });
 
-        const $ = cheerio.load(html);
+        const page = await browser.newPage();
 
-        // =========================
-        // 🧠 DEFAULT
-        // =========================
-        let title = "Produit AliExpress 🔥";
-        let image = "";
-        let description = "";
-        let rating = "4.5";
-        let reviews = "5";
-        let sold = "17";
-        let price = null;
+        await page.setUserAgent(
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"
+        );
 
-        // =========================
-        // 🔥 TRY JSON DATA
-        // =========================
-        const jsonMatch = html.match(/window\.__INIT_DATA__\s*=\s*({.*});/);
+        await page.goto(url, {
+            waitUntil: "networkidle2",
+            timeout: 60000
+        });
 
-        if (jsonMatch) {
-            try {
-                const data = JSON.parse(jsonMatch[1]);
+        // ⏳ نستنى الداتا تتشحن
+        await page.waitForTimeout(3000);
 
-                const product = data?.data?.root?.fields || {};
+        // 🔥 EXTRACT REAL DATA
+        const data = await page.evaluate(() => {
+            let title = document.querySelector("h1")?.innerText || "";
 
-                title = product?.title || title;
-                image = product?.image || image;
+            let image =
+                document.querySelector("img")?.src ||
+                "";
 
-                rating = product?.averageStar || rating;
-                reviews = product?.totalReview || reviews;
-                sold = product?.tradeCount || sold;
+            let price =
+                document.querySelector(".product-price-value")?.innerText ||
+                "";
 
-                price = product?.price?.minPrice || null;
+            let rating =
+                document.querySelector(".overview-rating-average")?.innerText ||
+                "";
 
-            } catch (e) {
-                console.log("⚠️ JSON parse error");
-            }
-        }
+            let reviews =
+                document.querySelector(".overview-rating-count")?.innerText ||
+                "";
 
-        // =========================
-        // 🔁 FALLBACK META
-        // =========================
-        if (!image) {
-            image = $('meta[property="og:image"]').attr('content') || "";
-        }
+            let sold =
+                document.body.innerText.match(/(\d+)\s*sold/i)?.[1] ||
+                document.body.innerText.match(/(\d+)\s*vendus/i)?.[1] ||
+                "0";
 
-        if (!description) {
-            description = $('meta[property="og:description"]').attr('content') || "";
-        }
+            return { title, image, price, rating, reviews, sold };
+        });
 
-        if (!title || title === "No title") {
-            title = $('meta[property="og:title"]').attr('content') || title;
-        }
+        await browser.close();
 
-        // =========================
-        // 🧼 CLEAN
-        // =========================
-        title = title.replace(/\\"/g, '"');
-        description = description.replace(/\\"/g, '"');
-
-        if (description.length > 150) {
-            description = description.substring(0, 150) + "...";
-        }
-
-        // =========================
-        // 📦 RESPONSE
-        // =========================
         res.json({
             success: true,
-            title,
-            image,
-            description,
-            rating,
-            reviews,
-            sold,
-            price
+            ...data
         });
 
     } catch (err) {
-
-        console.log("❌ ERROR:", err.message);
+        console.log(err.message);
 
         res.json({
             success: false,
@@ -136,16 +85,10 @@ app.get('/api', async (req, res) => {
     }
 });
 
-// =========================
-// ✅ TEST
-// =========================
-app.get('/', (req, res) => {
-    res.send("API WORKING ✅");
+app.get("/", (req, res) => {
+    res.send("PUPPETEER API WORKING 🚀");
 });
 
-// =========================
-// 🚀 START
-// =========================
 app.listen(process.env.PORT || 3000, () => {
-    console.log("Server running 🚀");
+    console.log("Server running...");
 });
