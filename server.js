@@ -1,7 +1,6 @@
 const express = require('express');
-const axios = require('axios');
 const cors = require('cors');
-const cheerio = require('cheerio');
+const puppeteer = require('puppeteer');
 
 const app = express();
 app.use(cors());
@@ -14,121 +13,63 @@ app.get('/api', async (req, res) => {
     }
 
     try {
-        // ✅ FIX URL
+        // FIX URL
         const match = url.match(/item\/(\d+)/);
         if (match) {
             url = `https://www.aliexpress.com/item/${match[1]}.html`;
         }
 
-        console.log("Fetching:", url);
+        console.log("🔥 Opening browser...");
 
-        // 🔥 REAL BROWSER HEADERS
-        const { data: html } = await axios.get(url, {
-            headers: {
-                "User-Agent":
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
-                "Accept-Language": "en-US,en;q=0.9",
-                "Accept": "text/html,application/xhtml+xml",
-                "Connection": "keep-alive"
-            },
-            timeout: 15000
+        const browser = await puppeteer.launch({
+            headless: "new",
+            args: ['--no-sandbox', '--disable-setuid-sandbox']
         });
 
-        const $ = cheerio.load(html);
+        const page = await browser.newPage();
 
-        // =========================
-        // 🔥 META DATA (STRONG)
-        // =========================
-        let title =
-            $('meta[property="og:title"]').attr('content') ||
-            $('title').text() ||
-            "No title";
+        await page.setUserAgent(
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"
+        );
 
-        let image =
-            $('meta[property="og:image"]').attr('content') ||
-            "";
+        await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
 
-        let description =
-            $('meta[property="og:description"]').attr('content') ||
-            "";
+        // ⏳ نستنى الصفحة تكمل
+        await new Promise(r => setTimeout(r, 4000));
 
-        // =========================
-        // 🔥 PRICE (NEW SYSTEM)
-        // =========================
-        let price = null;
+        const data = await page.evaluate(() => {
+            let title = document.querySelector('meta[property="og:title"]')?.content || "";
+            let image = document.querySelector('meta[property="og:image"]')?.content || "";
+            let description = document.querySelector('meta[property="og:description"]')?.content || "";
 
-        const priceText = html.match(/"price":"([\d.]+)"/);
-        if (priceText) price = parseFloat(priceText[1]);
+            let rating = document.body.innerText.match(/([0-5]\.\d)\s*Stars/)?.[1] || "0";
+            let reviews = document.body.innerText.match(/(\d+)\s*Reviews/)?.[1] || "0";
+            let sold = document.body.innerText.match(/(\d+)\s*Sold/)?.[1] || "0";
 
-        // =========================
-        // 🔥 RATING + REVIEWS + SOLD (FIXED 💀)
-        // =========================
-        let rating = "0";
-        let reviews = "0";
-        let sold = "0";
+            let price = document.body.innerText.match(/\$([\d.]+)/)?.[1] || null;
 
-        // ⭐ rating
-        const ratingMatch = html.match(/"averageStar":"?([\d.]+)"?/);
-        if (ratingMatch) rating = ratingMatch[1];
+            return { title, image, description, rating, reviews, sold, price };
+        });
 
-        // 💬 reviews
-        const reviewMatch = html.match(/"totalReview":(\d+)/);
-        if (reviewMatch) reviews = reviewMatch[1];
+        await browser.close();
 
-        // 📦 sold
-        const soldMatch = html.match(/"tradeCount":"?(\d+)"?/);
-        if (soldMatch) sold = soldMatch[1];
-
-        // =========================
-        // 🔁 EXTRA FALLBACK (HTML)
-        // =========================
-        if (reviews === "0") {
-            const r = html.match(/(\d+)\s*Reviews/i);
-            if (r) reviews = r[1];
-        }
-
-        if (sold === "0") {
-            const s = html.match(/(\d+)\s*Sold/i);
-            if (s) sold = s[1];
-        }
-
-        // =========================
-        // 🧼 CLEAN
-        // =========================
-        title = title.replace(/\\"/g, '"');
-        description = description.replace(/\\"/g, '"');
-
-        if (description.length > 150) {
-            description = description.substring(0, 150) + "...";
-        }
-
-        // =========================
-        // ✅ RESULT
-        // =========================
         res.json({
             success: true,
-            title,
-            image,
-            price,
-            rating,
-            reviews,
-            sold,
-            description
+            ...data
         });
 
     } catch (err) {
-        console.log("ERROR:", err.message);
+        console.log(err);
 
         res.json({
             success: false,
-            error: "Scraping failed (blocked)"
+            error: "Puppeteer failed"
         });
     }
 });
 
-// test
 app.get('/', (req, res) => {
-    res.send("🔥 API ULTRA WORKING");
+    res.send("🔥 Puppeteer API WORKING");
 });
 
 app.listen(process.env.PORT || 3000, () => {
