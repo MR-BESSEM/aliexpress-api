@@ -1,9 +1,11 @@
 const express = require('express');
-const puppeteer = require('puppeteer');
+const axios = require('axios');
 const cors = require('cors');
 
 const app = express();
 app.use(cors());
+
+const API_KEY = "ee9267c6e7819058946fe56b9c0bec52";
 
 app.get('/api', async (req, res) => {
     let url = req.query.url;
@@ -13,54 +15,33 @@ app.get('/api', async (req, res) => {
     }
 
     try {
-        // 🔧 FIX URL
+        // FIX URL
         const match = url.match(/item\/(\d+)/);
         if (match) {
             url = `https://www.aliexpress.com/item/${match[1]}.html`;
         }
 
-        // 🚀 launch browser
-        const browser = await puppeteer.launch({
-            headless: "new",
-            args: ["--no-sandbox", "--disable-setuid-sandbox"]
-        });
+        // 🔥 request via ScraperAPI
+        const apiUrl = `http://api.scraperapi.com?api_key=${API_KEY}&url=${encodeURIComponent(url)}`;
 
-        const page = await browser.newPage();
+        const { data: html } = await axios.get(apiUrl);
 
-        await page.setUserAgent(
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
-        );
-
-        await page.goto(url, { waitUntil: "networkidle2", timeout: 0 });
-
-        // 🧠 extract data
-        const data = await page.evaluate(() => {
-
-            let title = document.querySelector('h1')?.innerText || "No title";
-            let image = document.querySelector('img')?.src || "";
-            let description = document.querySelector('meta[name="description"]')?.content || "";
-
-            return {
-                title,
-                image,
-                description
-            };
-        });
-
-        await browser.close();
+        let title = html.match(/<title>(.*?)<\/title>/)?.[1] || "No title";
+        let image = html.match(/<meta property="og:image" content="(.*?)"/)?.[1] || "";
+        let description = html.match(/<meta property="og:description" content="(.*?)"/)?.[1] || "";
 
         res.json({
             success: true,
-            title: data.title,
-            image: data.image,
+            title,
+            image,
             price: null,
             rating: "4.5",
-            description: data.description
+            description
         });
 
     } catch (err) {
         console.log(err.message);
-        res.json({ success: false, error: "Puppeteer failed" });
+        res.json({ success: false, error: "ScraperAPI failed" });
     }
 });
 
