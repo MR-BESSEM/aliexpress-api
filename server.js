@@ -1,5 +1,5 @@
 const express = require('express');
-const axios = require('axios');
+const puppeteer = require('puppeteer');
 const cors = require('cors');
 
 const app = express();
@@ -13,100 +13,55 @@ app.get('/api', async (req, res) => {
     }
 
     try {
-        // =========================
-        // 🔧 FIX URL (IMPORTANT)
-        // =========================
-        let cleanUrl = url;
-
+        // 🔧 FIX URL
         const match = url.match(/item\/(\d+)/);
-
         if (match) {
-            cleanUrl = `https://www.aliexpress.com/item/${match[1]}.html`;
+            url = `https://www.aliexpress.com/item/${match[1]}.html`;
         }
 
-        // =========================
-        // 🌐 REQUEST (ANTI-BOT)
-        // =========================
-        const { data: html } = await axios.get(cleanUrl, {
-            headers: {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-                "Accept-Language": "en-US,en;q=0.9",
-                "Referer": "https://www.google.com/",
-                "Accept": "text/html"
-            }
+        // 🚀 launch browser
+        const browser = await puppeteer.launch({
+            headless: "new",
+            args: ["--no-sandbox", "--disable-setuid-sandbox"]
         });
 
-        // =========================
-        // 🧠 DEFAULT VALUES
-        // =========================
-        let title = "No title";
-        let image = "";
-        let price = null;
-        let rating = "4.5";
-        let description = "";
+        const page = await browser.newPage();
 
-        // =========================
-        // 🔥 EXTRACT NEXT_DATA
-        // =========================
-        const matchNext = html.match(/<script id="__NEXT_DATA__" type="application\/json">(.*?)<\/script>/);
+        await page.setUserAgent(
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+        );
 
-        if (matchNext && matchNext[1]) {
-            try {
-                const json = JSON.parse(matchNext[1]);
+        await page.goto(url, { waitUntil: "networkidle2", timeout: 0 });
 
-                const product = json?.props?.pageProps?.initialData?.data;
+        // 🧠 extract data
+        const data = await page.evaluate(() => {
 
-                if (product) {
-                    title = product?.titleModule?.subject || title;
-                    image = product?.imageModule?.imagePathList?.[0] || image;
-                    price = product?.priceModule?.minPrice || price;
-                    rating = product?.titleModule?.feedbackRating?.averageStar || rating;
-                }
+            let title = document.querySelector('h1')?.innerText || "No title";
+            let image = document.querySelector('img')?.src || "";
+            let description = document.querySelector('meta[name="description"]')?.content || "";
 
-            } catch (e) {
-                console.log("JSON parse error");
-            }
-        }
+            return {
+                title,
+                image,
+                description
+            };
+        });
 
-        // =========================
-        // 🔁 FALLBACK (OG TAGS)
-        // =========================
-        if (title === "No title") {
-            const t = html.match(/<meta property="og:title" content="(.*?)"/);
-            if (t) title = t[1];
-        }
+        await browser.close();
 
-        if (!image) {
-            const i = html.match(/<meta property="og:image" content="(.*?)"/);
-            if (i) image = i[1];
-        }
-
-        const d = html.match(/<meta property="og:description" content="(.*?)"/);
-        if (d) description = d[1];
-
-        // =========================
-        // 📦 RESULT
-        // =========================
         res.json({
             success: true,
-            title,
-            image,
-            price,
-            rating,
-            description
+            title: data.title,
+            image: data.image,
+            price: null,
+            rating: "4.5",
+            description: data.description
         });
 
     } catch (err) {
         console.log(err.message);
-        res.json({ success: false, error: "Fetch failed" });
+        res.json({ success: false, error: "Puppeteer failed" });
     }
-});
-
-// =========================
-// 🟢 TEST ROUTE
-// =========================
-app.get('/', (req, res) => {
-    res.send("API WORKING ✅");
 });
 
 app.listen(process.env.PORT || 3000, () => {
