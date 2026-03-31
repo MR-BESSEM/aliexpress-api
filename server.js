@@ -59,9 +59,14 @@ app.get("/api", async (req, res) => {
         const product =
             data?.aliexpress_affiliate_productdetail_get_response?.result?.products?.product?.[0];
 
-        if (!product) {
-            return res.json({ success: false, error: "No data" });
-        }
+if (!product) {
+    console.log("❌ FULL API RESPONSE:", data);
+
+    return res.json({
+        success: false,
+        error: "Product not in affiliate system"
+    });
+}
 
         res.json({
             success: true,
