@@ -1,6 +1,7 @@
 const express = require("express");
 const axios = require("axios");
 const crypto = require("crypto");
+const cheerio = require("cheerio");
 const cors = require("cors");
 
 const app = express();
@@ -9,12 +10,13 @@ app.use(cors());
 const APP_KEY = "519132";
 const APP_SECRET = "zVuEwukrhlQYK5tx4ibRBYqznPQlQw6l";
 
+// 🔐 SIGN FUNCTION
 function sign(params) {
     const sorted = Object.keys(params).sort();
     let base = APP_SECRET;
 
-    sorted.forEach(key => {
-        base += key + params[key];
+    sorted.forEach(k => {
+        base += k + params[k];
     });
 
     base += APP_SECRET;
@@ -25,19 +27,17 @@ function sign(params) {
 app.get("/api", async (req, res) => {
     let url = req.query.url;
 
-    if (!url) {
-        return res.json({ success: false, error: "No URL" });
-    }
+    if (!url) return res.json({ success: false });
+
+    const match = url.match(/item\/(\d+)/);
+    if (!match) return res.json({ success: false });
+
+    const id = match[1];
 
     try {
-        // ✅ extract product ID
-        const match = url.match(/item\/(\d+)/);
-        if (!match) {
-            return res.json({ success: false, error: "Invalid URL" });
-        }
-
-        const productId = match[1];
-
+        // =====================
+        // 🟢 1. TRY API FIRST
+        // =====================
         const params = {
             method: "aliexpress.affiliate.productdetail.get",
             app_key: APP_KEY,
@@ -45,48 +45,71 @@ app.get("/api", async (req, res) => {
             timestamp: new Date().toISOString().replace(/[-:TZ.]/g, "").slice(0, 14),
             format: "json",
             v: "2.0",
-            product_ids: productId,
-            fields: "product_title,product_main_image_url,sale_price,original_price,discount,product_detail_url,shop_name,product_evaluate_rate,product_sales_volume"
+            product_ids: id,
+            fields: "product_title,product_main_image_url,sale_price,product_evaluate_rate,product_sales_volume"
         };
 
         params.sign = sign(params);
 
-        const { data } = await axios.get(
-            "https://api-sg.aliexpress.com/sync",
-            { params }
-        );
+        const apiRes = await axios.get("https://api-sg.aliexpress.com/sync", { params });
 
         const product =
-            data?.aliexpress_affiliate_productdetail_get_response?.result?.products?.product?.[0];
+            apiRes.data?.aliexpress_affiliate_productdetail_get_response?.result?.products?.product?.[0];
 
-if (!product) {
-    console.log("❌ FULL API RESPONSE:", data);
+        // ✅ SUCCESS API
+        if (product) {
+            return res.json({
+                success: true,
+                source: "api",
+                title: product.product_title,
+                image: product.product_main_image_url,
+                price: product.sale_price,
+                rating: product.product_evaluate_rate,
+                sold: product.product_sales_volume
+            });
+        }
 
-    return res.json({
-        success: false,
-        error: "Product not in affiliate system"
-    });
-}
+        console.log("⚠️ API failed → switching to scraping...");
 
-        res.json({
+        // =====================
+        // 🔴 2. SCRAPING FALLBACK
+        // =====================
+        const { data: html } = await axios.get(url, {
+            headers: {
+                "User-Agent": "Mozilla/5.0"
+            }
+        });
+
+        const $ = cheerio.load(html);
+
+        let title = $('meta[property="og:title"]').attr("content") || "";
+        let image = $('meta[property="og:image"]').attr("content") || "";
+        let description = $('meta[property="og:description"]').attr("content") || "";
+
+        // 🔥 smart extraction
+        let rating = html.match(/"averageStar":"([\d.]+)"/)?.[1] || "4.5";
+        let sold = html.match(/"tradeCount":"(\d+)"/)?.[1] || "0";
+        let price = html.match(/"minPrice":"([\d.]+)"/)?.[1] || "";
+
+        return res.json({
             success: true,
-            title: product.product_title,
-            image: product.product_main_image_url,
-            price: product.sale_price,
-            rating: product.product_evaluate_rate,
-            sold: product.product_sales_volume,
-            store: product.shop_name,
-            url: product.product_detail_url
+            source: "scraping",
+            title,
+            image,
+            price,
+            rating,
+            sold,
+            description
         });
 
     } catch (err) {
-        console.log(err.response?.data || err.message);
+        console.log(err.message);
 
         res.json({
             success: false,
-            error: "API failed"
+            error: "Both API & scraping failed"
         });
     }
 });
 
-app.listen(3000, () => console.log("API WORKING 🔥"));
+app.listen(3000, () => console.log("HYBRID API WORKING 💀"));
