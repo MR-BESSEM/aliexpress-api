@@ -5,7 +5,7 @@ const cheerio = require('cheerio');
 
 const app = express();
 
-// ✅ FIX CORS نهائي
+// ✅ CORS FIX
 app.use(cors({
     origin: "*"
 }));
@@ -17,7 +17,7 @@ app.use((req, res, next) => {
 });
 
 // =========================
-// 🚀 API ROUTE
+// 🚀 API
 // =========================
 app.get('/api', async (req, res) => {
 
@@ -30,61 +30,76 @@ app.get('/api', async (req, res) => {
     try {
 
         // =========================
-        // 🔧 FIX LINK
+        // 🔧 FIX URL
         // =========================
         const match = url.match(/item\/(\d+)/);
         if (match) {
             url = `https://www.aliexpress.com/item/${match[1]}.html`;
         }
 
-        console.log("Fetching:", url);
+        console.log("🚀 Fetch:", url);
 
         // =========================
-        // 🌐 REQUEST PAGE
+        // 🔥 PROXY (ANTI BLOCK)
         // =========================
-        const { data: html } = await axios.get(url, {
-            headers: {
-                "User-Agent": "Mozilla/5.0",
-                "Accept-Language": "en-US,en;q=0.9"
-            }
+        const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
+
+        const { data: html } = await axios.get(proxyUrl, {
+            timeout: 15000
         });
 
         const $ = cheerio.load(html);
 
         // =========================
-        // 🧠 TITLE
+        // 🧠 DEFAULT
         // =========================
-        let title = $('meta[property="og:title"]').attr('content') || "No title";
+        let title = "Produit AliExpress 🔥";
+        let image = "";
+        let description = "";
+        let rating = "4.5";
+        let reviews = "5";
+        let sold = "17";
+        let price = null;
 
         // =========================
-        // 🖼 IMAGE
+        // 🔥 TRY JSON DATA
         // =========================
-        let image = $('meta[property="og:image"]').attr('content') || "";
+        const jsonMatch = html.match(/window\.__INIT_DATA__\s*=\s*({.*});/);
+
+        if (jsonMatch) {
+            try {
+                const data = JSON.parse(jsonMatch[1]);
+
+                const product = data?.data?.root?.fields || {};
+
+                title = product?.title || title;
+                image = product?.image || image;
+
+                rating = product?.averageStar || rating;
+                reviews = product?.totalReview || reviews;
+                sold = product?.tradeCount || sold;
+
+                price = product?.price?.minPrice || null;
+
+            } catch (e) {
+                console.log("⚠️ JSON parse error");
+            }
+        }
 
         // =========================
-        // 📝 DESCRIPTION
+        // 🔁 FALLBACK META
         // =========================
-        let description = $('meta[property="og:description"]').attr('content') || "";
+        if (!image) {
+            image = $('meta[property="og:image"]').attr('content') || "";
+        }
 
-        // =========================
-        // ⭐ RATING (REAL PARSE)
-        // =========================
-        let rating = html.match(/"averageStar":\s*"([\d.]+)"/)?.[1] || "4.5";
+        if (!description) {
+            description = $('meta[property="og:description"]').attr('content') || "";
+        }
 
-        // =========================
-        // 💬 REVIEWS
-        // =========================
-        let reviews = html.match(/"totalReview":\s*"(\d+)"/)?.[1] || "5";
-
-        // =========================
-        // 📦 SOLD
-        // =========================
-        let sold = html.match(/"tradeCount":\s*"(\d+)"/)?.[1] || "17";
-
-        // =========================
-        // 💰 PRICE
-        // =========================
-        let price = html.match(/"minPrice":\s*"([\d.]+)"/)?.[1] || null;
+        if (!title || title === "No title") {
+            title = $('meta[property="og:title"]').attr('content') || title;
+        }
 
         // =========================
         // 🧼 CLEAN
@@ -92,8 +107,8 @@ app.get('/api', async (req, res) => {
         title = title.replace(/\\"/g, '"');
         description = description.replace(/\\"/g, '"');
 
-        if (description.length > 200) {
-            description = description.substring(0, 200) + "...";
+        if (description.length > 150) {
+            description = description.substring(0, 150) + "...";
         }
 
         // =========================
@@ -112,7 +127,7 @@ app.get('/api', async (req, res) => {
 
     } catch (err) {
 
-        console.log("ERROR:", err.message);
+        console.log("❌ ERROR:", err.message);
 
         res.json({
             success: false,
@@ -122,14 +137,14 @@ app.get('/api', async (req, res) => {
 });
 
 // =========================
-// ✅ TEST ROUTE
+// ✅ TEST
 // =========================
 app.get('/', (req, res) => {
     res.send("API WORKING ✅");
 });
 
 // =========================
-// 🚀 START SERVER
+// 🚀 START
 // =========================
 app.listen(process.env.PORT || 3000, () => {
     console.log("Server running 🚀");
