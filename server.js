@@ -6,7 +6,7 @@ const app = express();
 app.use(cors());
 
 // 🔑 حط API KEY متاعك هنا
-const API_KEY = "PUT_YOUR_API_KEY_HERE";
+const API_KEY = "ee9267c6e7819058946fe56b9c0bec52";
 
 app.get('/api', async (req, res) => {
     let url = req.query.url;
