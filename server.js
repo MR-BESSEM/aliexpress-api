@@ -1,157 +1,118 @@
 const express = require('express');
-const axios = require('axios');
+const puppeteer = require('puppeteer-core');
+const chromium = require('@sparticuz/chromium');
 const cors = require('cors');
-const crypto = require('crypto');
 
 const app = express();
 app.use(cors());
-app.use(express.json());
 
 const PORT = process.env.PORT || 10000;
 
 // ==========================
-// 🔐 API CONFIG
+// 🚀 LAUNCH BROWSER (Render Fix)
 // ==========================
-const APP_KEY = "519132";
-const APP_SECRET = "zVuEwukrhlQYK5tx4ibRBYqznPQlQw6l";
-
-// ==========================
-// 🔐 SIGN FUNCTION
-// ==========================
-function sign(params) {
-    const sorted = Object.keys(params).sort();
-    let str = APP_SECRET;
-
-    sorted.forEach(k => {
-        str += k + params[k];
+async function getBrowser() {
+    return await puppeteer.launch({
+        args: chromium.args,
+        executablePath: await chromium.executablePath(),
+        headless: chromium.headless,
     });
-
-    str += APP_SECRET;
-
-    return crypto.createHash('md5').update(str).digest('hex').toUpperCase();
 }
 
 // ==========================
-// 🔍 SEARCH PRODUCTS
+// 📦 PRODUCT FETCH
 // ==========================
-app.get('/search', async (req, res) => {
-    const keyword = req.query.q;
+app.get('/api/product', async (req, res) => {
+    const productUrl = req.query.url;
 
-    if (!keyword) {
-        return res.json({ success: false, products: [] });
+    if (!productUrl) {
+        return res.json({ success: false, error: "No URL" });
     }
 
-    try {
-        const url = `https://www.aliexpress.com/wholesale?SearchText=${keyword}`;
+    let browser;
+    let page;
 
-        const { data: html } = await axios.get(url, {
-            headers: {
-                "User-Agent": "Mozilla/5.0"
+    try {
+        browser = await getBrowser();
+        page = await browser.newPage();
+
+        await page.setUserAgent(
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/119 Safari/537.36'
+        );
+
+        // ⚡ speed optimization
+        await page.setRequestInterception(true);
+        page.on('request', (req) => {
+            if (['image', 'stylesheet', 'font'].includes(req.resourceType())) {
+                req.abort();
+            } else {
+                req.continue();
             }
         });
 
-        const matches = [...html.matchAll(
-            /"productId":"(\d+)".*?"title":"(.*?)".*?"image":"(.*?)".*?"price":"(.*?)"/g
-        )];
-
-        const products = matches.slice(0, 12).map(m => ({
-            product_id: m[1],
-            product_title: m[2],
-            product_main_image_url: m[3]?.startsWith("//")
-                ? "https:" + m[3]
-                : m[3] || "",
-            target_sale_price: m[4] || (Math.random() * 10 + 1).toFixed(2)
-        }));
-
-        res.json({
-            success: true,
-            products
-        });
-
-    } catch (err) {
-        console.log("SEARCH ERROR:", err.message);
-
-        res.json({
-            success: false,
-            products: []
-        });
-    }
-});
-
-// ==========================
-// 📦 PRODUCT DETAILS
-// ==========================
-app.get('/product', async (req, res) => {
-    const id = req.query.id;
-
-    if (!id) {
-        return res.json({
-            success: false,
-            error: "No ID"
-        });
-    }
-
-    try {
-        const url = `https://www.aliexpress.com/item/${id}.html`;
-
-        const { data: html } = await axios.get(url, {
-            headers: {
-                "User-Agent": "Mozilla/5.0"
-            }
+        await page.goto(productUrl, {
+            waitUntil: 'domcontentloaded',
+            timeout: 60000
         });
 
         // ==========================
         // 🧠 EXTRACT DATA
         // ==========================
+        const data = await page.evaluate(() => {
 
-        const title =
-            html.match(/<title>(.*?)<\/title>/)?.[1] ||
-            "Produit AliExpress 🔥";
+            const clean = (txt) => txt?.trim() || "";
 
-        let image =
-            html.match(/property="og:image" content="(.*?)"/)?.[1] || "";
+            const title =
+                document.querySelector('h1')?.innerText ||
+                document.title ||
+                "Produit AliExpress 🔥";
 
-        if (image && image.startsWith("//")) {
-            image = "https:" + image;
-        }
+            const price =
+                document.querySelector('[class*="price"]')?.innerText || "";
 
-        // ==========================
-        // 🎲 FAKE DATA (fallback)
-        // ==========================
-        const product = {
-            product_title: title.replace(" - AliExpress", ""),
-            product_main_image_url: image,
-            target_sale_price: (Math.random() * 10 + 1).toFixed(2),
-            evaluate_rate: (Math.random() * 2 + 3).toFixed(1),
-            lastest_volume: Math.floor(Math.random() * 500 + 10),
-            sales_volume: Math.floor(Math.random() * 1000 + 50)
-        };
+            let image =
+                document.querySelector('meta[property="og:image"]')?.content || "";
+
+            if (image && image.startsWith("//")) {
+                image = "https:" + image;
+            }
+
+            return {
+                title: clean(title),
+                price: clean(price),
+                image
+            };
+        });
 
         res.json({
             success: true,
-            product
+            title: data.title,
+            price: data.price,
+            image: data.image
         });
 
     } catch (err) {
-        console.log("PRODUCT ERROR:", err.message);
+        console.log("ERROR:", err.message);
 
         res.json({
             success: false,
-            error: "Scraping failed"
+            error: err.message
         });
+
+    } finally {
+        if (page) await page.close();
+        if (browser) await browser.close();
     }
 });
 
 // ==========================
-// 🧪 TEST ROUTE
+// 🧪 TEST
 // ==========================
 app.get('/', (req, res) => {
-    res.send("🔥 AliExpress API running...");
+    res.send("🔥 Puppeteer API working");
 });
 
 // ==========================
-// 🚀 START SERVER
-// ==========================
 app.listen(PORT, () => {
-    console.log(`🚀 Server running on port ${PORT}`);
+    console.log("🚀 Server running on port", PORT);
 });
